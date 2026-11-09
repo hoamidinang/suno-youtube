@@ -37,10 +37,8 @@ def setup_cookie_file():
             normalized_lines.append(line_str)
             continue
 
-        # Tach theo khoang trang bat ky (space hoac tab)
         parts = line_str.split()
         if len(parts) >= 7:
-            # Chuan hoa bat buoc 7 cot ngan cach bang dung 1 ky tu TAB (\t)
             domain, flag, path, secure, expiration, name = parts[:6]
             value = " ".join(parts[6:])
             normalized_lines.append(f"{domain}\t{flag}\t{path}\t{secure}\t{expiration}\t{name}\t{value}")
@@ -49,10 +47,9 @@ def setup_cookie_file():
     with open(COOKIE_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(normalized_lines) + "\n")
 
-    print(f"[COOKIES OK] Da nap thanh cong {cookie_count} cookies vao file {COOKIE_FILE} ({os.path.getsize(COOKIE_FILE)} bytes)")
+    print(f"[COOKIES OK] Da nap {cookie_count} cookies vao file {COOKIE_FILE}")
     return True
 
-# Khoi tao file cookie ngay khi server khoi dong
 setup_cookie_file()
 
 def extract_video_id(url: str):
@@ -67,7 +64,6 @@ async def get_audio(url: str = Query(...)):
 
     clean_url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # Kiem tra file cookie san sang
     has_cookie = os.path.exists(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 50
     if not has_cookie:
         setup_cookie_file()
@@ -75,13 +71,16 @@ async def get_audio(url: str = Query(...)):
 
     cookie_args = ["--cookies", COOKIE_FILE] if has_cookie else []
 
-    # 1. Lay thong tin bai hat
+    # Cho phep ket hop ca mweb, android va web de lay luong audio khong bi vuong giai ma JS
+    client_args = ["--extractor-args", "youtube:player_client=mweb,android,web"]
+
+    # 1. Lay tieu de bai hat
     raw_title = f"youtube_{video_id}"
     try:
         info_cmd = [
             "yt-dlp",
             *cookie_args,
-            "--extractor-args", "youtube:player_client=web",
+            *client_args,
             "--dump-json",
             "--no-playlist",
             clean_url
@@ -99,12 +98,12 @@ async def get_audio(url: str = Query(...)):
     file_name = f"{safe_title}.m4a"
     encoded_name = urllib.parse.quote(file_name)
 
-    # 2. Stream audio bang yt-dlp kem cookie va client web
+    # 2. Chon format linh hoat: uu tien itag 140 (M4A 128k), sau do den bat ky bestaudio hoac 251 (Opus)
     ytdlp_cmd = [
         "yt-dlp",
         *cookie_args,
-        "--extractor-args", "youtube:player_client=web",
-        "-f", "ba[ext=m4a]/ba/b",
+        *client_args,
+        "-f", "140/bestaudio[ext=m4a]/bestaudio/251/best",
         "-o", "-",
         "--no-playlist",
         clean_url
@@ -112,7 +111,7 @@ async def get_audio(url: str = Query(...)):
 
     process = subprocess.Popen(ytdlp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # Doc 64KB dau tien de kiem tra luong
+    # Doc 64KB dau tien de kiem tra luong du lieu thuc te
     first_chunk = process.stdout.read(64 * 1024)
     if not first_chunk:
         err_msg = process.stderr.read().decode("utf-8", errors="ignore").strip()
