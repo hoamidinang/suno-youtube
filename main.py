@@ -34,7 +34,7 @@ async def get_audio(url: str = Query(...)):
     try:
         info_cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=ios,android",
+            "--extractor-args", "youtube:player_client=tv_embedded,web_safari",
             "--dump-json",
             "--no-playlist",
             "--no-warnings",
