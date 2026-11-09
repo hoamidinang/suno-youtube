@@ -25,35 +25,55 @@ def extract_video_id(url: str):
 async def get_audio(url: str = Query(...)):
     video_id = extract_video_id(url)
     if not video_id:
-        raise HTTPException(status_code=400, detail="URL khong hop le")
+        raise HTTPException(status_code=400, detail="URL YouTube không hợp lệ")
 
     clean_url = f"https://www.youtube.com/watch?v={video_id}"
 
+    # 1. Lấy tiêu đề bài hát (dùng client iOS/Android để tránh bot check)
+    raw_title = f"youtube_{video_id}"
     try:
-        info_cmd = ["yt-dlp", "--dump-json", "--no-playlist", "--no-warnings", "--quiet", clean_url]
-        proc = subprocess.run(info_cmd, capture_output=True, text=True, timeout=12)
-        raw_title = json.loads(proc.stdout).get("title", f"youtube_{video_id}") if proc.returncode == 0 else f"youtube_{video_id}"
+        info_cmd = [
+            "yt-dlp",
+            "--extractor-args", "youtube:player_client=ios,android",
+            "--dump-json",
+            "--no-playlist",
+            "--no-warnings",
+            clean_url
+        ]
+        proc = subprocess.run(info_cmd, capture_output=True, text=True, timeout=15)
+        if proc.returncode == 0 and proc.stdout.strip():
+            info = json.loads(proc.stdout)
+            raw_title = info.get("title", raw_title)
     except Exception:
-        raw_title = f"youtube_{video_id}"
+        pass
 
     safe_title = "".join(c for c in raw_title if c not in r'\/:*?"<>|').strip()[:100] or f"youtube_{video_id}"
     file_name = f"{safe_title}.m4a"
     encoded_name = urllib.parse.quote(file_name)
 
-    # Stream audio trực tiếp từ yt-dlp
+    # 2. Khởi tạo stream audio với cấu hình bypass bot
     ytdlp_cmd = [
         "yt-dlp",
-        "-f", "bestaudio[ext=m4a]/ba/b",
+        "--extractor-args", "youtube:player_client=ios,android",
+        "-f", "ba[ext=m4a]/ba/b",
         "-o", "-",
         "--no-playlist",
-        "--no-warnings",
-        "--quiet",
         clean_url
     ]
 
     process = subprocess.Popen(ytdlp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+    # Đọc trước 64KB đầu tiên để đảm bảo YouTube đã nhả luồng âm thanh
+    first_chunk = process.stdout.read(64 * 1024)
+    if not first_chunk:
+        err_msg = process.stderr.read().decode("utf-8", errors="ignore").strip()
+        process.kill()
+        print("yt-dlp error:", err_msg)
+        last_line = err_msg.split("\n")[-1] if err_msg else "YouTube chặn luồng phát trực tiếp"
+        raise HTTPException(status_code=500, detail=f"yt-dlp: {last_line}")
+
     def iterfile():
+        yield first_chunk
         try:
             while True:
                 chunk = process.stdout.read(64 * 1024)
