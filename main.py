@@ -1,4 +1,3 @@
-Python
 import json
 import subprocess
 import urllib.parse
