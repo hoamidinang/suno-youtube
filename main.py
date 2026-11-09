@@ -70,9 +70,8 @@ async def get_audio(url: str = Query(...)):
         has_cookie = os.path.exists(COOKIE_FILE) and os.path.getsize(COOKIE_FILE) > 50
 
     cookie_args = ["--cookies", COOKIE_FILE] if has_cookie else []
-
-    # Cho phep ket hop ca mweb, android va web de lay luong audio khong bi vuong giai ma JS
-    client_args = ["--extractor-args", "youtube:player_client=mweb,android,web"]
+    # Su dung client ios va tv de tranh co che chan PO Token tren datacenter
+    client_args = ["--extractor-args", "youtube:player_client=ios,tv"]
 
     # 1. Lay tieu de bai hat
     raw_title = f"youtube_{video_id}"
@@ -98,12 +97,12 @@ async def get_audio(url: str = Query(...)):
     file_name = f"{safe_title}.m4a"
     encoded_name = urllib.parse.quote(file_name)
 
-    # 2. Chon format linh hoat: uu tien itag 140 (M4A 128k), sau do den bat ky bestaudio hoac 251 (Opus)
+    # 2. Khoi tao luong stream: uu tien ba (bestaudio), tu dong fallback sang b (best mp4)
     ytdlp_cmd = [
         "yt-dlp",
         *cookie_args,
         *client_args,
-        "-f", "140/bestaudio[ext=m4a]/bestaudio/251/best",
+        "-f", "ba/b",
         "-o", "-",
         "--no-playlist",
         clean_url
@@ -111,12 +110,18 @@ async def get_audio(url: str = Query(...)):
 
     process = subprocess.Popen(ytdlp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # Doc 64KB dau tien de kiem tra luong du lieu thuc te
+    # Doc 64KB dau tien
     first_chunk = process.stdout.read(64 * 1024)
     if not first_chunk:
         err_msg = process.stderr.read().decode("utf-8", errors="ignore").strip()
         process.kill()
         print("[STREAM ERROR]", err_msg)
+
+        # In danh sach cac format thuc te dang co de kiem tra
+        diag = subprocess.run(["yt-dlp", *cookie_args, *client_args, "-F", clean_url], capture_output=True, text=True, timeout=15)
+        print("=== FORMATS CO SAN TRAN SERVER ===")
+        print(diag.stdout or diag.stderr)
+
         last_line = err_msg.split("\n")[-1] if err_msg else "YouTube tu choi truyen audio"
         raise HTTPException(status_code=500, detail=f"yt-dlp: {last_line}")
 
